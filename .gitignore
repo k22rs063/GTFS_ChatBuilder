@@ -1,0 +1,43 @@
+# Environment / secrets (API key 等を含むため絶対に commit しない)
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# uv
+.uv-cache/
+uv.lock
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Workspace の実データ・生成物 (利用者ごとに異なる/秘匿の可能性があるため除外)
+# サンプルとして共有したいファイルがあれば !workspace/<name> で個別に許可する
+workspace/*
+!workspace/.gitkeep
+
+# 内部の状態ファイル
+**/.gtfs_progress.json
+**/_self_eval_results.json
+
+# Node (もし将来戻すことがあっても安全)
+node_modules/
+package-lock.json
+
+# 研究進捗・計画書など個人情報を含む内部ドキュメント (public repo では公開しない)
+研究進捗_*.md
+研究指導計画書_*.md
+private/
