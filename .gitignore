@@ -37,7 +37,10 @@ workspace/*
 node_modules/
 package-lock.json
 
-# 研究進捗・計画書など個人情報を含む内部ドキュメント (public repo では公開しない)
+# 研究進捗・計画書・論文草稿など個人情報を含む内部ドキュメント
+# (public repo では公開しないため除外)
 研究進捗_*.md
 研究指導計画書_*.md
+論文章立てドラフト_*.md
+論文_*.md
 private/
