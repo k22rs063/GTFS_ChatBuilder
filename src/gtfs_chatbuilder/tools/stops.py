@@ -28,8 +28,70 @@ from langchain.tools import tool
 
 from gtfs_chatbuilder.gtfs_writer import write_gtfs_csv
 from gtfs_chatbuilder.paths import WORKSPACE_DIR
+from gtfs_chatbuilder.processors.encoding import read_text_auto
+from gtfs_chatbuilder.processors.stops_normalizer import normalize_stops
 from gtfs_chatbuilder.progress import load_progress, save_progress
 from gtfs_chatbuilder.validators.base import read_csv_records
+
+
+@tool
+def generate_stops_from_csv(input_csv_filename: str) -> str:
+    """自治体が持っている停留所情報 CSV から GTFS の stops.txt を生成する。
+
+    自治体の停留所一覧 CSV (バス停名 + 緯度経度 等を含むもの) を読み込み、
+    GTFS の stops.txt (stop_id, stop_name, stop_lat, stop_lon) に変換する。
+
+    対応する入力:
+    - エンコード: cp932 / utf-8 / utf-8-sig (BOM 有無問わず) を自動判別
+    - ヘッダ別名: 「停留所名/バス停名/停留所」「緯度経度/緯度/経度」 等
+    - 緯度経度: 十進数 (33.6158) も DMS (33°36'56.9"N 131°03'52.5"E) も両対応
+    - stop_id: 明示列 > No. 列 > 自動連番 (S1, S2, ...) の順で決まる
+
+    出力先は workspace/stops.txt 固定。
+    LLM はファイル名を引数に詰めるだけで、stop_id や座標は決定論的に作る。
+
+    Args:
+        input_csv_filename: 停留所情報 CSV のファイル名 (例: "停留所情報.csv")
+
+    Returns:
+        生成結果のサマリ (件数、座標未設定数など)
+    """
+    input_path = WORKSPACE_DIR / input_csv_filename
+    if not input_path.exists():
+        return f"エラー: ファイルが見つかりません: {input_path}"
+
+    try:
+        text = read_text_auto(input_path)
+    except UnicodeDecodeError as e:
+        return f"エラー: 停留所 CSV のエンコード判定に失敗: {e}"
+
+    try:
+        normalized = normalize_stops(text)
+    except ValueError as e:
+        return f"エラー: 停留所 CSV の変換に失敗: {e}"
+
+    output = WORKSPACE_DIR / "stops.txt"
+    output.write_text(normalized, encoding="utf-8")
+
+    lines = [r for r in normalized.split("\n") if r]
+    count = len(lines) - 1  # header を除く
+    # 座標未設定をカウント
+    missing_coords = 0
+    for ln in lines[1:]:
+        cells = ln.split(",")
+        if len(cells) >= 4 and (not cells[2].strip() or not cells[3].strip()):
+            missing_coords += 1
+
+    summary = (
+        f"stops.txt を生成しました ({count}件の停留所)。\n"
+        f"出力先: {output}"
+    )
+    if missing_coords:
+        summary += (
+            f"\n⚠ {missing_coords}件の停留所で座標が未設定です。"
+            "元データに緯度経度を追加するか、KML から補完してください。"
+        )
+    return summary
 
 # 日本語ヘッダー → GTFSフィールド名 のマッピング。
 # キーは正規化 (前後空白除去・小文字化) して比較する。

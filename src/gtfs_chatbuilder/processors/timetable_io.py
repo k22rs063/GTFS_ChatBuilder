@@ -15,6 +15,8 @@ from pathlib import Path
 
 import openpyxl
 
+from gtfs_chatbuilder.processors.encoding import read_text_auto
+
 
 def read_timetable_sources(path: Path) -> list[tuple[str, str]]:
     """ファイルパスから (シート名, CSV テキスト) のリストを返す。
@@ -37,11 +39,7 @@ def read_timetable_sources(path: Path) -> list[tuple[str, str]]:
 
 
 def _csv_sources(path: Path) -> list[tuple[str, str]]:
-    try:
-        text = path.read_text(encoding="utf-8-sig")
-    except UnicodeDecodeError:
-        text = path.read_text(encoding="cp932")
-    return [(path.name, text)]
+    return [(path.name, read_text_auto(path))]
 
 
 def _xlsx_sources(path: Path) -> list[tuple[str, str]]:

@@ -8,6 +8,7 @@ TOOL_LABELS: dict[str, str] = {
     "set_agency": "事業者情報の登録",
     "set_feed_info": "データセット情報の登録",
     "import_stops_from_excel": "停留所マスタの取り込み（Excel）",
+    "generate_stops_from_csv": "停留所情報の取り込み（CSV）",
     "fill_stop_coordinates_from_kml": "停留所の座標を KML から補完",
     "import_routes_from_excel": "路線マスタの取り込み（Excel）",
     "generate_stop_times_from_csv": "時刻表データの作成",

@@ -21,6 +21,7 @@ from gtfs_chatbuilder.controllers import (
 )
 from gtfs_chatbuilder.friendly_names import arg_label, tool_label
 from gtfs_chatbuilder.paths import WORKSPACE_DIR
+from gtfs_chatbuilder.processors.encoding import read_text_auto
 from gtfs_chatbuilder.processors.timetable_io import read_timetable_sources
 from gtfs_chatbuilder.processors.timetable_normalizer import normalize_timetable
 
@@ -97,6 +98,47 @@ def _render_pending_action(idx: int, action: PendingAction) -> None:
         _render_stop_times_preview(action.args)
 
 
+def _load_known_stop_names(stops_filename: str) -> set[str]:
+    """stops.txt から stop_name 集合を読み込む (cross-file 整合性チェック用)。
+
+    stops.txt が無ければ空集合 (= 警告を出さない、初期状態を許容)。
+    GTFS 標準列順 (stop_id, stop_code, stop_name, stop_lat, stop_lon) を前提に
+    3 列目を stop_name として読む。
+    """
+    stops_path = WORKSPACE_DIR / stops_filename
+    if not stops_path.exists():
+        return set()
+    try:
+        text = read_text_auto(stops_path)
+    except UnicodeDecodeError:
+        return set()
+    known: set[str] = set()
+    for line in text.splitlines()[1:]:
+        cells = line.split(",")
+        if len(cells) >= 3 and cells[2].strip():
+            known.add(cells[2].strip())
+    return known
+
+
+def _find_unmatched_stop_names(
+    normalized_csv: str, known: set[str]
+) -> list[str]:
+    """正規化済みの時刻表 CSV (1 列目が stop_name) から、known に無い停留所名を返す。"""
+    if not known:
+        return []
+    unmatched: list[str] = []
+    seen: set[str] = set()
+    for line in normalized_csv.splitlines()[1:]:
+        cells = line.split(",")
+        if not cells:
+            continue
+        name = cells[0].strip()
+        if name and name not in known and name not in seen:
+            unmatched.append(name)
+            seen.add(name)
+    return unmatched
+
+
 def _render_stop_times_preview(args: dict) -> None:
     """generate_stop_times_from_csv の確認画面に、normalize 後のテンプレ形式
     時刻表を表として表示する。利用者はここで「形式変換が正しいか」を確認できる。
@@ -128,12 +170,31 @@ def _render_stop_times_preview(args: dict) -> None:
         "列の対応や値の置換 (例: 東/西→e/w) に問題がなければ「実行する」を押してください。"
     )
 
+    # stops.txt と照合するための既知停留所名セットを 1 回だけ読み込む
+    known_stop_names = _load_known_stop_names(
+        args.get("stops_filename", "stops.txt")
+    )
+
     for name, text in sources:
         try:
             normalized = normalize_timetable(text)
         except ValueError as e:
             st.warning(f"[{name}] 正規化失敗: {e}")
             continue
+
+        # cross-file 整合性チェック: stops.txt に登録されていない停留所名を可視化
+        unmatched = _find_unmatched_stop_names(normalized, known_stop_names)
+        if unmatched:
+            preview = "、".join(unmatched[:5])
+            more = "" if len(unmatched) <= 5 else f" 他 {len(unmatched)-5} 件"
+            st.error(
+                f"⚠ [{name}] 以下の停留所が stops.txt に登録されていません "
+                f"({len(unmatched)} 件): {preview}{more}"
+            )
+            st.caption(
+                "このまま実行すると該当行の stop_id が空欄になります。"
+                "停留所情報を取り込んでから再実行するか、表記揺れを修正してください。"
+            )
 
         rows = [r.split(",") for r in normalized.split("\n") if r]
         if not rows:

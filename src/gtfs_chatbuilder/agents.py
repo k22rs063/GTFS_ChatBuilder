@@ -26,6 +26,7 @@ from gtfs_chatbuilder.tools.kml import convert_kml_to_coordinates
 from gtfs_chatbuilder.tools.project_status import get_project_status
 from gtfs_chatbuilder.tools.shapes import generate_shapes_from_coordinates
 from gtfs_chatbuilder.tools.stop_times import generate_stop_times_from_csv
+from gtfs_chatbuilder.tools.stops import generate_stops_from_csv
 
 # .env が未設定のときに使うフォールバック値。
 _DEFAULT_LLM_BASE_URL = "http://133.17.164.115:1234/v1"
@@ -46,6 +47,11 @@ GTFS_AGENT_SYSTEM_PROMPT = """あなたはGTFS-JP v4 作成支援アシスタン
 - 「進捗」「状況」「どこまで進んだ」「次に何を」を含む発話 → 必ずこのツールを呼ぶ
 - 何か新しい入力作業を始める前 → 必ずこのツールを呼んで現状把握
 - ツールの戻り値(JSON)を解釈して、ユーザーに分かりやすく日本語で要約する
+
+## generate_stops_from_csv
+- 「停留所を作って」「停留所情報を取り込みたい」「stops.txt を作って」→ このツールを呼ぶ
+- 自治体の停留所一覧 CSV (バス停名 + 緯度経度 等を含むもの) から stops.txt を生成する
+- 引数は workspace 内の CSV ファイル名。ファイル名が不明ならユーザーに質問する
 
 ## generate_stop_times_from_csv
 - 「stop_times を作って」「時刻表からGTFSを作って」「時刻表を取り込みたい」→ このツールを呼ぶ
@@ -91,6 +97,7 @@ def create_gtfs_agent():
     # 利用者確認層: 書き込み系ツールは実行前に利用者の承認を必要とする。
     # get_project_status は読み取り専用なので auto-approve (interrupt_on に含めない)。
     interrupt_on = {
+        "generate_stops_from_csv": True,
         "generate_stop_times_from_csv": True,
         "generate_shapes_from_coordinates": True,
         "convert_kml_to_coordinates": True,
@@ -100,6 +107,7 @@ def create_gtfs_agent():
         model=llm,
         tools=[
             get_project_status,
+            generate_stops_from_csv,
             generate_stop_times_from_csv,
             generate_shapes_from_coordinates,
             convert_kml_to_coordinates,

@@ -14,6 +14,7 @@ from pathlib import Path
 from langchain.tools import tool
 
 from gtfs_chatbuilder.paths import WORKSPACE_DIR
+from gtfs_chatbuilder.processors.encoding import read_text_auto
 from gtfs_chatbuilder.processors.kml import process_kml_data
 
 _SAFE_NAME_RE = re.compile(r"[^\w\-]+", re.UNICODE)
@@ -49,10 +50,9 @@ def convert_kml_to_coordinates(kml_filename: str) -> str:
         return f"エラー: KMLファイルが見つかりません: {kml}"
 
     try:
-        kml_content = kml.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        # KML は通常 UTF-8 だが、保険として cp932 もトライ
-        kml_content = kml.read_text(encoding="cp932")
+        kml_content = read_text_auto(kml)
+    except UnicodeDecodeError as e:
+        return f"エラー: KML のエンコード判定に失敗: {e}"
 
     try:
         items = process_kml_data(kml_content)

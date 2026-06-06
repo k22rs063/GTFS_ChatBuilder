@@ -15,16 +15,10 @@ from pathlib import Path
 from langchain.tools import tool
 
 from gtfs_chatbuilder.paths import WORKSPACE_DIR
+from gtfs_chatbuilder.processors.encoding import read_text_auto
 from gtfs_chatbuilder.processors.stop_times import process_stop_times_data
 from gtfs_chatbuilder.processors.timetable_io import read_timetable_sources
 from gtfs_chatbuilder.processors.timetable_normalizer import normalize_timetable
-
-
-def _read_stops(stops_path: Path) -> str:
-    try:
-        return stops_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return stops_path.read_text(encoding="cp932")
 
 
 @tool
@@ -65,7 +59,10 @@ def generate_stop_times_from_csv(
     if not stops.exists():
         return f"エラー: stops.txt が見つかりません: {stops}"
 
-    stops_text = _read_stops(stops)
+    try:
+        stops_text = read_text_auto(stops)
+    except UnicodeDecodeError as e:
+        return f"エラー: stops.txt のエンコード判定に失敗: {e}"
 
     try:
         sources = read_timetable_sources(input_path)
@@ -103,6 +100,20 @@ def generate_stop_times_from_csv(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(final_text, encoding="utf-8")
 
+    # 整合性チェック: stop_id が空 (= stops.txt に該当停留所名が無かった) 行を集計
+    stop_ids_in_stops: set[str] = set()
+    for line in stops_text.splitlines()[1:]:  # header skip
+        cells = line.split(",")
+        if cells:
+            stop_ids_in_stops.add(cells[0].strip())
+    unmatched_count = 0
+    for line in final_text.splitlines()[1:]:  # header skip
+        cells = line.split(",")
+        if len(cells) >= 4:
+            sid = cells[3].strip()
+            if not sid or sid not in stop_ids_in_stops:
+                unmatched_count += 1
+
     data_rows = max(len(final_text.splitlines()) - 1, 0)
     suffix = input_path.suffix.lower()
     src_label = (
@@ -112,6 +123,12 @@ def generate_stop_times_from_csv(
         f"stop_times.txt を生成しました ({src_label}, {data_rows}行)。\n"
         f"出力先: {output}"
     )
+    if unmatched_count:
+        summary += (
+            f"\n⚠ {unmatched_count}/{data_rows} 行で stop_id を解決できません"
+            "でした。時刻表に出てくる停留所名が stops.txt に登録されていない"
+            "可能性があります (表記揺れ・登録漏れ等)。"
+        )
     if errors:
         summary += "\n警告: " + "; ".join(errors)
     return summary
