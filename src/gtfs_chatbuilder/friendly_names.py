@@ -58,3 +58,41 @@ def tool_label(name: str) -> str:
 def arg_label(key: str) -> str:
     """引数キー → 日本語ラベル。未定義ならそのまま返す。"""
     return ARG_LABELS.get(key, key)
+
+
+# ツールごとの自然言語サマリ (確認層で表示)。
+# format() で引数 dict を当てはめる前提。
+# 同じ arg key (input_csv_filename) でもツールごとに意味が違うので、
+# 表組みではなくサマリ文で違いを表現する。
+TOOL_SUMMARIES: dict[str, str] = {
+    "generate_stops_from_csv": (
+        "「{input_csv_filename}」から **停留所マスタ (stops.txt)** "
+        "を作成します。"
+    ),
+    "generate_stop_times_from_csv": (
+        "「{input_csv_filename}」から **時刻表データ (stop_times.txt)** "
+        "を作成します。"
+    ),
+    "convert_kml_to_coordinates": (
+        "「{kml_filename}」から **経路の座標テキスト** を抽出します。"
+    ),
+    "generate_shapes_from_coordinates": (
+        "経路ID「{shape_id}」として、「{coordinates_filename}」から "
+        "**経路情報 (shapes.txt)** を作成します。"
+    ),
+}
+
+
+def tool_summary(tool_name: str, args: dict) -> str | None:
+    """ツールとその引数から、確認層に出す自然言語サマリを返す。
+
+    テンプレートに無いツールや引数が足りない場合は None。
+    """
+    tmpl = TOOL_SUMMARIES.get(tool_name)
+    if not tmpl:
+        return None
+    safe_args = {k: ("（未設定）" if v in (None, "") else v) for k, v in args.items()}
+    try:
+        return tmpl.format(**safe_args)
+    except KeyError:
+        return None

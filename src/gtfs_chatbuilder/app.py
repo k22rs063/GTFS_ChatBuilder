@@ -19,7 +19,7 @@ from gtfs_chatbuilder.controllers import (
     invoke_agent,
     resume_agent,
 )
-from gtfs_chatbuilder.friendly_names import arg_label, tool_label
+from gtfs_chatbuilder.friendly_names import arg_label, tool_label, tool_summary
 from gtfs_chatbuilder.paths import WORKSPACE_DIR
 from gtfs_chatbuilder.processors.encoding import read_text_auto
 from gtfs_chatbuilder.processors.timetable_io import read_timetable_sources
@@ -83,17 +83,20 @@ def _handle_response(response: AgentResponse) -> None:
 
 
 def _render_pending_action(idx: int, action: PendingAction) -> None:
-    """1件の承認待ちアクションを表示する (日本語ラベル + パラメータ表 + 必要ならプレビュー)。"""
+    """1件の承認待ちアクションを表示する (ツール別の自然言語サマリ + 必要ならプレビュー)。"""
     label = tool_label(action.tool_name)
     st.markdown(f"#### {idx + 1}. {label}")
-    if action.args:
-        rows = ["| 項目 | 値 |", "| :--- | :--- |"]
+
+    # ツールごとに自然言語のサマリ (例: 「○○」から停留所マスタを作成します)。
+    # 同じ arg key でもツールによって意味が違うので表組みより自然文の方が誤解が少ない。
+    summary = tool_summary(action.tool_name, action.args or {})
+    if summary:
+        st.markdown(summary)
+    elif action.args:
+        # サマリテンプレが未定義のツールはフォールバックで簡易表示
         for k, v in action.args.items():
             display_v = "（未設定）" if v in (None, "") else str(v)
-            rows.append(f"| {arg_label(k)} | {display_v} |")
-        st.markdown("\n".join(rows))
-    else:
-        st.info("追加のパラメータはありません。")
+            st.markdown(f"- **{arg_label(k)}**: {display_v}")
 
     # stop_times 生成は確認層で「正規化後の時刻表」を見せる (本研究の三層構造の中核)。
     if action.tool_name == "generate_stop_times_from_csv":
