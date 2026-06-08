@@ -122,11 +122,17 @@ def _load_known_stop_names(stops_filename: str) -> set[str]:
 
 def _find_unmatched_stop_names(
     normalized_csv: str, known: set[str]
-) -> list[str]:
-    """正規化済みの時刻表 CSV (1 列目が stop_name) から、known に無い停留所名を返す。"""
+) -> list[tuple[str, list[str]]]:
+    """正規化済みの時刻表 CSV (1 列目が stop_name) から、known に無い停留所名を返す。
+
+    各要素は (stop_name, 類似候補リスト) のタプル。類似候補は known の中で
+    その名前を部分文字列として含むもの (例: 「椎田交番」 → 「椎田交番（上り）」)。
+    類似候補があれば「親停留所/標柱の表記揺れ」、無ければ「真の登録漏れ」と
+    利用者に区別を提示できる。
+    """
     if not known:
         return []
-    unmatched: list[str] = []
+    unmatched: list[tuple[str, list[str]]] = []
     seen: set[str] = set()
     for line in normalized_csv.splitlines()[1:]:
         cells = line.split(",")
@@ -134,7 +140,8 @@ def _find_unmatched_stop_names(
             continue
         name = cells[0].strip()
         if name and name not in known and name not in seen:
-            unmatched.append(name)
+            candidates = sorted(k for k in known if name in k or k in name)
+            unmatched.append((name, candidates))
             seen.add(name)
     return unmatched
 
@@ -185,18 +192,38 @@ def _render_stop_times_preview(args: dict) -> None:
         # cross-file 整合性チェック: stops.txt に登録されていない停留所名を可視化
         unmatched = _find_unmatched_stop_names(normalized, known_stop_names)
         if unmatched:
-            preview = "、".join(unmatched[:5])
-            more = "" if len(unmatched) <= 5 else f" 他 {len(unmatched)-5} 件"
+            # 「親停留所/標柱の表記揺れ」と「真の登録漏れ」を区別して提示
+            similar = [(n, cands) for n, cands in unmatched if cands]
+            missing = [n for n, cands in unmatched if not cands]
+
             st.error(
-                f"⚠ [{name}] 以下の停留所が stops.txt に登録されていません "
-                f"({len(unmatched)} 件): {preview}{more}"
+                f"⚠ [{name}] 時刻表に出てくる {len(unmatched)} 件の停留所が "
+                "stops.txt に見つかりません"
             )
+            if similar:
+                st.markdown("**🔀 表記揺れの可能性 (停留所情報に類似名あり)** — "
+                            "親停留所と標柱(乗り場)を分けた表記の差と思われます:")
+                rows = ["| 時刻表の表記 | stops.txt に近い名前 |", "| :--- | :--- |"]
+                for n, cands in similar[:8]:
+                    cand_preview = "、".join(cands[:3])
+                    if len(cands) > 3:
+                        cand_preview += f" 他 {len(cands)-3} 件"
+                    rows.append(f"| {n} | {cand_preview} |")
+                if len(similar) > 8:
+                    rows.append(f"| ...他 {len(similar)-8} 件 | |")
+                st.markdown("\n".join(rows))
+            if missing:
+                preview = "、".join(missing[:5])
+                more = "" if len(missing) <= 5 else f" 他 {len(missing)-5} 件"
+                st.markdown(
+                    f"**❌ 真の登録漏れ (停留所情報に該当なし)** ({len(missing)} 件): "
+                    f"{preview}{more}"
+                )
             st.caption(
-                "実行時にプログラムが上の表の stop_name から stops.txt 経由で "
-                "停留所ID (stop_id) を引きます。上記の停留所はこの検索に失敗するため、"
-                "生成される **stop_times.txt の停留所ID 列が空欄** になります "
-                "(下の表ではなく、出力ファイル側の話です)。"
-                "停留所情報を取り込み直すか、表記揺れを修正してください。"
+                "実行時、プログラムは時刻表の stop_name で stops.txt を完全一致検索します。"
+                "上記の停留所はその検索に失敗するので、生成される stop_times.txt の "
+                "停留所ID (stop_id) 列が空欄になります (下の表ではなく出力ファイル側の話)。"
+                "表記揺れであれば停留所情報側を統一するか、停留所情報を取り込み直してください。"
             )
 
         rows = [r.split(",") for r in normalized.split("\n") if r]
