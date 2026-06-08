@@ -59,6 +59,8 @@ def _init_state() -> None:
         st.session_state["pending_actions"] = None
     if "saved_uploads" not in st.session_state:
         st.session_state["saved_uploads"] = set()
+    if "renaming_file" not in st.session_state:
+        st.session_state["renaming_file"] = None
 
 
 def _handle_response(response: AgentResponse) -> None:
@@ -324,21 +326,60 @@ def _save_uploaded_files(uploaded) -> list[str]:
     return new_saves
 
 
+def _next_timetable_filename() -> str:
+    """次に使える「時刻表N.csv」を返す (N は 1 から始まり、未使用の最小値)。"""
+    n = 1
+    while (WORKSPACE_DIR / f"時刻表{n}.csv").exists():
+        n += 1
+    return f"時刻表{n}.csv"
+
+
 def _save_pasted_timetable(text: str) -> str:
     """貼り付けられた時刻表テキストを workspace に CSV として保存し、ファイル名を返す。
 
     Excel からのコピーはタブ区切りで貼り付けられるので、タブをカンマに変換して
     そのまま CSV として扱う (元から CSV のテキストを貼られた場合も同じ処理で通る)。
+    ファイル名は「時刻表1.csv」「時刻表2.csv」と連番。後で名前変更も可能。
     """
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     normalized = "\n".join(
         line.replace("\t", ",") for line in normalized.split("\n")
     )
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"pasted_timetable_{ts}.csv"
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    filename = _next_timetable_filename()
     (WORKSPACE_DIR / filename).write_text(normalized, encoding="utf-8")
     return filename
+
+
+def _rename_workspace_file(old_name: str, new_name: str) -> tuple[bool, str]:
+    """workspace 内のファイルをリネーム。成功なら (True, 新名)、失敗なら (False, 理由)。
+
+    安全のため:
+    - パスセパレータ / 上位ディレクトリ参照は拒否
+    - 既存ファイル名と衝突する場合は拒否
+    - 元と同じ名前なら no-op
+    """
+    new_name = new_name.strip()
+    if not new_name:
+        return False, "ファイル名が空です"
+    if "/" in new_name or "\\" in new_name or ".." in new_name:
+        return False, "ファイル名にパス区切り文字や '..' は使えません"
+    if new_name == old_name:
+        return True, new_name
+    old_path = WORKSPACE_DIR / old_name
+    new_path = WORKSPACE_DIR / new_name
+    if not old_path.exists():
+        return False, "元のファイルが見つかりません"
+    if new_path.exists():
+        return False, f"「{new_name}」は既に存在します"
+    old_path.rename(new_path)
+    # アップロードのデデュープ記憶も同名分を更新 (再アップロード時に重複しないように)
+    if "saved_uploads" in st.session_state:
+        st.session_state["saved_uploads"] = {
+            (new_name if key[0] == old_name else key[0], key[1])
+            for key in st.session_state["saved_uploads"]
+        }
+    return True, new_name
 
 
 def _delete_workspace_file(name: str) -> None:
@@ -427,14 +468,43 @@ def _render_sidebar() -> None:
             # 内部用ファイル (_*, .* 等) は隠す
             shown = [f for f in files if not f.startswith(("_", "."))]
             if shown:
+                renaming = st.session_state.get("renaming_file")
                 for f in shown:
-                    fcol, dcol = st.columns([5, 1])
-                    fcol.markdown(f"・{f}")
-                    if dcol.button(
-                        "✕", key=f"del_{f}", help=f"{f} を削除"
-                    ):
-                        _delete_workspace_file(f)
-                        st.rerun()
+                    if renaming == f:
+                        # 名前変更モード: 入力欄 + 保存/中止
+                        ncol, scol, ccol = st.columns([4, 1, 1])
+                        new_name = ncol.text_input(
+                            "新ファイル名",
+                            value=f,
+                            label_visibility="collapsed",
+                            key=f"rename_input_{f}",
+                        )
+                        if scol.button(
+                            "✓", key=f"save_{f}", help="保存"
+                        ):
+                            ok, msg = _rename_workspace_file(f, new_name)
+                            if not ok:
+                                st.warning(msg)
+                            st.session_state["renaming_file"] = None
+                            st.rerun()
+                        if ccol.button(
+                            "↩", key=f"cancel_{f}", help="キャンセル"
+                        ):
+                            st.session_state["renaming_file"] = None
+                            st.rerun()
+                    else:
+                        fcol, ecol, dcol = st.columns([4, 1, 1])
+                        fcol.markdown(f"・{f}")
+                        if ecol.button(
+                            "✏", key=f"edit_{f}", help=f"{f} の名前を変更"
+                        ):
+                            st.session_state["renaming_file"] = f
+                            st.rerun()
+                        if dcol.button(
+                            "✕", key=f"del_{f}", help=f"{f} を削除"
+                        ):
+                            _delete_workspace_file(f)
+                            st.rerun()
             else:
                 st.info("まだファイルはありません。")
         else:
