@@ -192,8 +192,11 @@ def _render_stop_times_preview(args: dict) -> None:
                 f"({len(unmatched)} 件): {preview}{more}"
             )
             st.caption(
-                "このまま実行すると該当行の stop_id が空欄になります。"
-                "停留所情報を取り込んでから再実行するか、表記揺れを修正してください。"
+                "実行時にプログラムが上の表の stop_name から stops.txt 経由で "
+                "停留所ID (stop_id) を引きます。上記の停留所はこの検索に失敗するため、"
+                "生成される **stop_times.txt の停留所ID 列が空欄** になります "
+                "(下の表ではなく、出力ファイル側の話です)。"
+                "停留所情報を取り込み直すか、表記揺れを修正してください。"
             )
 
         rows = [r.split(",") for r in normalized.split("\n") if r]
