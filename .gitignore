@@ -41,6 +41,7 @@ package-lock.json
 # (public repo では公開しないため除外)
 研究進捗_*.md
 研究指導計画書_*.md
+研究内容_*.md
 論文章立てドラフト_*.md
 論文_*.md
 private/
