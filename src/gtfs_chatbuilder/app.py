@@ -561,11 +561,197 @@ def _render_sidebar() -> None:
             )
 
 
+def _render_output_previews() -> None:
+    """生成済みの GTFS-JP ファイルを地図 / 表で表示する (出力確認層)。
+
+    三層構造の人間層を「入力データの確認」だけでなく「出力結果の確認」に
+    拡張する位置づけ。GTFS の仕様を知らない利用者でも、地図に経路が描画
+    されることで「正しく作れているか」を視覚的に判断できる。
+    """
+    has_stops = (WORKSPACE_DIR / "stops.txt").exists()
+    has_shapes = (WORKSPACE_DIR / "shapes.txt").exists()
+    has_stop_times = (WORKSPACE_DIR / "stop_times.txt").exists()
+
+    if not (has_stops or has_shapes or has_stop_times):
+        return
+
+    st.markdown("### 🗺 生成結果のプレビュー")
+    st.caption(
+        "生成された GTFS-JP ファイルを地図 / 表で確認できます。"
+        "経路や停留所が地図上で意図通りに見えるかを利用者が判断するレイヤ。"
+    )
+
+    if has_stops:
+        with st.expander(
+            "📍 停留所 (stops.txt) — 地図とテーブル", expanded=False
+        ):
+            _render_stops_output_map()
+
+    if has_shapes:
+        with st.expander(
+            "🛣 路線形状 (shapes.txt) — 地図", expanded=False
+        ):
+            _render_shapes_output_map()
+
+    if has_stop_times:
+        with st.expander(
+            "⏰ 時刻表 (stop_times.txt) — テーブル", expanded=False
+        ):
+            _render_stop_times_output_table()
+
+
+def _render_stops_output_map() -> None:
+    """stops.txt の停留所を地図にマーカー表示 + テーブル表示。"""
+    import pandas as pd
+
+    try:
+        df = pd.read_csv(
+            WORKSPACE_DIR / "stops.txt", dtype=str, keep_default_na=False
+        )
+    except Exception as e:  # noqa: BLE001
+        st.warning(f"stops.txt の読み込み失敗: {e}")
+        return
+
+    if "stop_lat" not in df.columns or "stop_lon" not in df.columns:
+        st.warning("stop_lat / stop_lon 列が見つかりません。")
+        return
+
+    df["lat"] = pd.to_numeric(df["stop_lat"], errors="coerce")
+    df["lon"] = pd.to_numeric(df["stop_lon"], errors="coerce")
+    valid = df.dropna(subset=["lat", "lon"])
+    invalid_count = len(df) - len(valid)
+
+    msg = f"{len(valid)} 件の停留所を地図に表示"
+    if invalid_count:
+        msg += f" (緯度経度が空 / 無効の {invalid_count} 件は除外)"
+    st.caption(msg)
+
+    if len(valid) > 0:
+        st.map(valid[["lat", "lon"]], zoom=11)
+
+    st.markdown("##### 全データ (テーブル)")
+    show_df = df.drop(columns=["lat", "lon"], errors="ignore")
+    st.dataframe(
+        show_df, use_container_width=True, hide_index=True, height=250
+    )
+
+
+def _render_shapes_output_map() -> None:
+    """shapes.txt の経路を地図にライン表示 (shape_id ごとに色分け)。"""
+    import pandas as pd
+    import pydeck as pdk
+
+    try:
+        df = pd.read_csv(
+            WORKSPACE_DIR / "shapes.txt", dtype=str, keep_default_na=False
+        )
+    except Exception as e:  # noqa: BLE001
+        st.warning(f"shapes.txt の読み込み失敗: {e}")
+        return
+
+    needed = ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"]
+    if not all(c in df.columns for c in needed):
+        st.warning(f"必要な列がありません: {needed}")
+        return
+
+    df["lat"] = pd.to_numeric(df["shape_pt_lat"], errors="coerce")
+    df["lon"] = pd.to_numeric(df["shape_pt_lon"], errors="coerce")
+    df["seq"] = pd.to_numeric(df["shape_pt_sequence"], errors="coerce")
+    df = df.dropna(subset=["lat", "lon", "seq"])
+
+    if df.empty:
+        st.info("有効な座標を含む経路がありません。")
+        return
+
+    palette = [
+        [220, 20, 60],
+        [30, 144, 255],
+        [50, 205, 50],
+        [255, 140, 0],
+        [186, 85, 211],
+        [0, 139, 139],
+        [255, 215, 0],
+    ]
+    shapes_data: list[dict] = []
+    for i, (shape_id, group) in enumerate(df.groupby("shape_id")):
+        sorted_group = group.sort_values("seq")
+        path_coords = sorted_group[["lon", "lat"]].values.tolist()
+        shapes_data.append(
+            {
+                "shape_id": str(shape_id),
+                "path": path_coords,
+                "color": palette[i % len(palette)],
+            }
+        )
+
+    st.caption(f"{len(shapes_data)} 経路を表示 / 合計 {len(df)} 点")
+
+    center_lat = float(df["lat"].mean())
+    center_lon = float(df["lon"].mean())
+
+    path_layer = pdk.Layer(
+        "PathLayer",
+        shapes_data,
+        get_path="path",
+        get_color="color",
+        width_min_pixels=3,
+        pickable=True,
+    )
+    view_state = pdk.ViewState(
+        latitude=center_lat, longitude=center_lon, zoom=11
+    )
+    deck = pdk.Deck(
+        layers=[path_layer],
+        initial_view_state=view_state,
+        tooltip={"text": "shape_id: {shape_id}"},
+    )
+    st.pydeck_chart(deck)
+
+    # 凡例
+    legend_parts = ["**凡例:**"]
+    for s in shapes_data:
+        r, g, b = s["color"]
+        legend_parts.append(
+            f"<span style='display:inline-block;width:18px;height:4px;"
+            f"background-color:rgb({r},{g},{b});margin-right:6px;"
+            f"vertical-align:middle;'></span>{s['shape_id']}"
+        )
+    st.markdown("　".join(legend_parts), unsafe_allow_html=True)
+
+
+def _render_stop_times_output_table() -> None:
+    """stop_times.txt を表で表示 (件数サマリ付き)。"""
+    import pandas as pd
+
+    try:
+        df = pd.read_csv(
+            WORKSPACE_DIR / "stop_times.txt",
+            dtype=str,
+            keep_default_na=False,
+        )
+    except Exception as e:  # noqa: BLE001
+        st.warning(f"stop_times.txt の読み込み失敗: {e}")
+        return
+
+    n_rows = len(df)
+    n_trips = df["trip_id"].nunique() if "trip_id" in df.columns else "?"
+    n_stops = df["stop_id"].nunique() if "stop_id" in df.columns else "?"
+    st.caption(
+        f"{n_rows} 行 / {n_trips} 便 / {n_stops} 種の停留所 ID"
+    )
+    st.dataframe(
+        df, use_container_width=True, hide_index=True, height=400
+    )
+
+
 def main() -> None:
     _init_state()
     _render_sidebar()
 
     st.title("GTFS-JP ChatBuilder")
+
+    # 生成済み GTFS-JP ファイルのプレビュー (collapsed expander)
+    _render_output_previews()
 
     # チャット履歴表示
     for message in st.session_state["messages"]:
