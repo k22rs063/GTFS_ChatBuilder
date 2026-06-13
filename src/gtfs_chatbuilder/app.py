@@ -125,6 +125,63 @@ def _load_known_stop_names(stops_filename: str) -> set[str]:
     return known
 
 
+def _coords_of_stop(stop_name: str) -> tuple[str, str] | None:
+    """stops.txt 内で stop_name に一致する行の (lat, lon) を返す。無ければ None。
+
+    GTFS 標準列順 (stop_id, stop_code, stop_name, stop_lat, stop_lon) を前提。
+    """
+    stops_path = WORKSPACE_DIR / "stops.txt"
+    if not stops_path.exists():
+        return None
+    try:
+        text = read_text_auto(stops_path)
+    except UnicodeDecodeError:
+        return None
+    for line in text.splitlines()[1:]:
+        cells = line.split(",")
+        if (
+            len(cells) >= 5
+            and cells[2].strip() == stop_name
+            and cells[3].strip()
+            and cells[4].strip()
+        ):
+            return cells[3].strip(), cells[4].strip()
+    return None
+
+
+def _add_stop_to_file(stop_name: str, lat: str, lon: str) -> str:
+    """stops.txt に 1 行追加し、新規 stop_id を返す。
+
+    stops.txt が無ければヘッダ付きで作成。stop_id は既存の S<N> 系の最大値 + 1
+    で自動採番 (S1, S2, ... と独立した名前空間で重複しない)。
+    列順は GTFS 標準 (stop_id, stop_code, stop_name, stop_lat, stop_lon)。
+    """
+    stops_path = WORKSPACE_DIR / "stops.txt"
+    header = "stop_id,stop_code,stop_name,stop_lat,stop_lon"
+    if not stops_path.exists():
+        stops_path.write_text(header + "\n", encoding="utf-8")
+
+    text = stops_path.read_text(encoding="utf-8")
+    lines = text.rstrip("\n").splitlines()
+    if not lines:
+        lines = [header]
+
+    max_n = 0
+    for ln in lines[1:]:
+        cells = ln.split(",")
+        if cells and cells[0].startswith("S"):
+            try:
+                n = int(cells[0][1:])
+                max_n = max(max_n, n)
+            except ValueError:
+                pass
+    new_id = f"S{max_n + 1}"
+    new_line = f"{new_id},,{stop_name},{lat},{lon}"
+    lines.append(new_line)
+    stops_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return new_id
+
+
 def _find_unmatched_stop_names(
     normalized_csv: str, known: set[str]
 ) -> list[tuple[str, list[str]]]:
@@ -149,6 +206,91 @@ def _find_unmatched_stop_names(
             unmatched.append((name, candidates))
             seen.add(name)
     return unmatched
+
+
+def _render_quick_add_stops(
+    unmatched: list[tuple[str, list[str]]], sheet_name: str
+) -> None:
+    """確認層内で未登録停留所を stops.txt に追加するインライン UI。
+
+    三層構造の「人間層で誤り検知 → 前の層 (入力データ) に戻って修正」を
+    画面内で完結させるための要。利用者は別ファイルを編集しに行く必要がない。
+    """
+    if not unmatched:
+        return
+
+    sanitize = lambda s: "".join(ch if ch.isalnum() else "_" for ch in s)
+    with st.expander(
+        f"✏ stops.txt にその場で追加 ({len(unmatched)} 件)", expanded=False
+    ):
+        st.caption(
+            "未登録の停留所を stops.txt に新規追加できます。"
+            "類似名候補がある場合、その停留所の座標を初期値に引いてあります"
+            "(変更可能)。追加後、警告は自動で更新されます。"
+        )
+
+        for i, (stop_name, candidates) in enumerate(unmatched):
+            with st.container(border=True):
+                if candidates:
+                    cand_text = "、".join(candidates[:3])
+                    st.markdown(
+                        f"**{stop_name}** — 🔀 類似名: {cand_text}"
+                    )
+                else:
+                    st.markdown(
+                        f"**{stop_name}** — ❌ stops.txt に該当なし"
+                    )
+
+                suggested = None
+                for cand in candidates:
+                    s = _coords_of_stop(cand)
+                    if s:
+                        suggested = s
+                        break
+
+                key_base = f"qa_{sanitize(sheet_name)}_{i}_{sanitize(stop_name)}"
+                c1, c2, c3 = st.columns([1.2, 1.2, 1])
+                lat_default = suggested[0] if suggested else ""
+                lon_default = suggested[1] if suggested else ""
+                lat_input = c1.text_input(
+                    "緯度",
+                    value=lat_default,
+                    key=f"{key_base}_lat",
+                    placeholder="例: 33.617",
+                )
+                lon_input = c2.text_input(
+                    "経度",
+                    value=lon_default,
+                    key=f"{key_base}_lon",
+                    placeholder="例: 131.064",
+                )
+                c3.markdown("&nbsp;")  # vertical alignment hack
+                if c3.button(
+                    "➕ 追加",
+                    key=f"{key_base}_btn",
+                    use_container_width=True,
+                ):
+                    if not lat_input.strip() or not lon_input.strip():
+                        st.warning("緯度経度を両方入力してください。")
+                    else:
+                        try:
+                            float(lat_input)
+                            float(lon_input)
+                        except ValueError:
+                            st.warning(
+                                "緯度経度は数値で入力してください (例: 33.617)。"
+                            )
+                        else:
+                            new_id = _add_stop_to_file(
+                                stop_name,
+                                lat_input.strip(),
+                                lon_input.strip(),
+                            )
+                            st.success(
+                                f"✓ 「{stop_name}」を stops.txt に追加 "
+                                f"(stop_id = {new_id})"
+                            )
+                            st.rerun()
 
 
 def _render_stop_times_preview(args: dict) -> None:
@@ -230,6 +372,9 @@ def _render_stop_times_preview(args: dict) -> None:
                 "停留所ID (stop_id) 列が空欄になります (下の表ではなく出力ファイル側の話)。"
                 "表記揺れであれば停留所情報側を統一するか、停留所情報を取り込み直してください。"
             )
+
+            # 「前の層に戻る」復旧アクション: stops.txt にその場で追加できる
+            _render_quick_add_stops(unmatched, sheet_name=name)
 
         rows = [r.split(",") for r in normalized.split("\n") if r]
         if not rows:
