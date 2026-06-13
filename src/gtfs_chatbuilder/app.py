@@ -305,6 +305,28 @@ def _render_stop_times_preview(args: dict) -> None:
         st.warning(f"入力ファイルが見つかりません: {input_filename}")
         return
 
+    # 依存ファイル (stops.txt) の存在を実行前に確認。
+    # 無いと実行時にプログラム層でエラーになる (= 復旧フローの 1 つだが、
+    # 確認層で先に気付けた方が UX が良い)。
+    stops_filename = args.get("stops_filename") or "stops.txt"
+    stops_path_check = WORKSPACE_DIR / stops_filename
+    if not stops_path_check.exists():
+        st.error(
+            f"❌ 必要な停留所マスタ「{stops_filename}」が workspace に "
+            "見つかりません。"
+        )
+        st.caption(
+            "stop_times.txt を作るには停留所マスタが必要です "
+            "(時刻表の停留所名 → stop_id を引くため)。"
+            "実行する前に、先に停留所情報 CSV から停留所を作成してください。"
+            "(例: 「<停留所情報のファイル名>.csv から停留所を作って」と入力)"
+        )
+        st.caption(
+            "このまま「✓ 実行する」を押すと、プログラム層が同じエラーを返します。"
+        )
+        # 変換プレビューは続けず終了 (続けると「準備 OK」と誤解させる)。
+        return
+
     try:
         sources = read_timetable_sources(input_path)
     except ValueError as e:
