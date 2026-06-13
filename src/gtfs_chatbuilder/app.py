@@ -624,10 +624,14 @@ def _render_sidebar() -> None:
         if st.button(
             "時刻表として保存",
             use_container_width=True,
-            disabled=not pasted.strip(),
         ):
-            saved_name = _save_pasted_timetable(pasted)
-            st.success(f"保存しました: `{saved_name}`")
+            if not pasted.strip():
+                st.warning(
+                    "上の欄に時刻表を貼り付けてから保存ボタンを押してください。"
+                )
+            else:
+                saved_name = _save_pasted_timetable(pasted)
+                st.success(f"保存しました: `{saved_name}`")
 
         st.divider()
 
