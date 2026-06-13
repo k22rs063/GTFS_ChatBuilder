@@ -348,8 +348,10 @@ def _render_stop_times_preview(args: dict) -> None:
                 "stops.txt に見つかりません"
             )
             if similar:
-                st.markdown("**🔀 表記揺れの可能性 (停留所情報に類似名あり)** — "
-                            "親停留所と標柱(乗り場)を分けた表記の差と思われます:")
+                st.markdown(
+                    "**🔀 似た名前が登録されています** — 表記が違うだけかも "
+                    "(親停留所と標柱の差、編集時のタイプミス等):"
+                )
                 rows = ["| 時刻表の表記 | stops.txt に近い名前 |", "| :--- | :--- |"]
                 for n, cands in similar[:8]:
                     cand_preview = "、".join(cands[:3])
@@ -363,8 +365,8 @@ def _render_stop_times_preview(args: dict) -> None:
                 preview = "、".join(missing[:5])
                 more = "" if len(missing) <= 5 else f" 他 {len(missing)-5} 件"
                 st.markdown(
-                    f"**❌ 真の登録漏れ (停留所情報に該当なし)** ({len(missing)} 件): "
-                    f"{preview}{more}"
+                    f"**❌ 停留所情報に存在しません** — 新規追加が必要 "
+                    f"({len(missing)} 件): {preview}{more}"
                 )
             st.caption(
                 "実行時、プログラムは時刻表の stop_name で stops.txt を完全一致検索します。"
